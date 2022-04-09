@@ -24,9 +24,9 @@ data_y = []
 data_plate_y = []
 data_car_y = []
 data_plate_text_y = []
-
-resizing_factor_x = float(512/1080)
-resizing_factor_y = float(512/1920)
+NUM_PIXELS = 512#264
+resizing_factor_x = float(NUM_PIXELS/1080)
+resizing_factor_y = float(NUM_PIXELS/1920)
 im_size = (int(1080*resizing_factor_x), int(1920*resizing_factor_y))
 
 
