@@ -84,31 +84,55 @@ class DataLoader:
         
         
     
+    #needs testing <- works as far as I can tell
     
-    def __check_bounds(self, left, top, right, bottom):
+    def __check_bounds(self, left, top, right, bottom, plate):
+        '''Makes sure that we don't crop out the plate or outside of the image'''    
+        if(left>plate[0]):
+            left = plate[0]
+            right = left+self.NUM_PIXELS
+        
+        if(right<(plate[0]+plate[2])):
+            right = (plate[0]+plate[2])
+            left = right-self.NUM_PIXELS
+        
+        if(top>plate[1]):
+            top = plate[1]
+            bottom = top+self.NUM_PIXELS
+        
+        if(bottom<(plate[1]+plate[3])):
+            bottom = plate[1]+plate[3]
+            top = bottom - self.NUM_PIXELS
+            
         if(left<0):
             left = 0
             right = self.NUM_PIXELS
+        
         if(right>self.WIDTH):
             right = self.WIDTH
             left = right-self.NUM_PIXELS
+        
         if(top<0):
             top = 0
             bottom = self.NUM_PIXELS
+        
         if(bottom>self.HEIGHT):
             bottom = self.HEIGHT
             top = bottom-self.NUM_PIXELS
             
         return left, top, right, bottom
     
-    def __adjust_label(self, index, data_plate_y, left, bottom):
-        buffer = data_plate_y[index]
+    def __adjust_label(self, plate, left, top):
+        
+        buffer = plate
         buffer[0] = buffer[0]-left
-        buffer[1] = buffer[1]-bottom
+        buffer[1] = buffer[1]-top
         return buffer
     
-    def __crop_and_save(self, image, index, counter, left, top, right, bottom):
-        crop = image.crop(self.__check_bounds(left, top, right, bottom))
+    def __crop_and_save(self, image, index, counter, left, top, right, bottom, plate):
+        left, top, right, bottom = self.__check_bounds(left, top, right, bottom, plate)
+        crop = image.crop((left, top, right, bottom))
+        #crop.show()
         crop.save(r'/data/'+str(index)+'-'+str(counter)+'.png')
         return crop
     
@@ -121,33 +145,52 @@ class DataLoader:
         right = car_y_buffer[0]+self.NUM_PIXELS
         top = car_y_buffer[1]
         bottom = car_y_buffer[1]+self.NUM_PIXELS
+        #label_buffer = []
+        local_plate = np.copy(data_plate_y[index])
+        #data_plate_y[index] = self.__adjust_label(index, data_plate_y, left, bottom)
         
-        
-        data_plate_y[index] = self.__adjust_label(index, data_plate_y, left, bottom)
-        
-        crop1 = self.__crop_and_save(image, index, counter, left, top, right, bottom)
+        crop1 = self.__crop_and_save(image, index, counter, left, top, right, bottom, local_plate)
+        adjusted_label = self.__adjust_label(local_plate, left, top)
+        crop1 = self.__show_image_plate_granular(adjusted_label, crop1, index, counter)
+        #label_buffer.append(adjusted_label)
         counter+=1
+        #crop1.show()
         
         right = car_y_buffer[0]+car_y_buffer[2]
         left = right-self.NUM_PIXELS               
-        crop2 = self.__crop_and_save(image, index, counter, left, top, right, bottom)
+        local_plate = np.copy(data_plate_y[index])
+        crop2 = self.__crop_and_save(image, index, counter, left, top, right, bottom, local_plate)
+        adjusted_label = self.__adjust_label(local_plate, left, top)
+        crop2 = self.__show_image_plate_granular(adjusted_label, crop2, index, counter)
         #crop2.show()
         counter+=1
         
         bottom = car_y_buffer[1]+car_y_buffer[3]
         top = bottom-self.NUM_PIXELS
-        
-        crop3 = self.__crop_and_save(image, index, counter, left, top, right, bottom)
+        local_plate = np.copy(data_plate_y[index])      
+        crop3 = self.__crop_and_save(image, index, counter, left, top, right, bottom, local_plate)
+        adjusted_label = self.__adjust_label(local_plate, left, top)
+        crop3 = self.__show_image_plate_granular(adjusted_label, crop3, index, counter)
         #crop3.show()
         counter+=1
+        
+        
         left = car_y_buffer[0]
         right = car_y_buffer[0]+self.NUM_PIXELS
-                
-        crop4 = self.__crop_and_save(image, index, counter, left, top, right, bottom)
+        local_plate = np.copy(data_plate_y[index])       
+        crop4 = self.__crop_and_save(image, index, counter, left, top, right, bottom, data_plate_y[index])
+        adjusted_label = self.__adjust_label(local_plate, left, top)
+        crop4 = self.__show_image_plate_granular(adjusted_label, crop4, index, counter)
         #crop4.show()
+        
         return crop1#, crop2, crop3, crop4
         
-        
+    def __show_image_plate_granular(self, label, image, index, counter):
+        image = np.array(image)
+        image[label[1]:(label[1]+label[3]), label[0]:(label[0]+label[2]), 1] = 0
+        image = PIL.Image.fromarray(image.astype(np.uint8))
+        image.save(r'/data/'+str(index)+'-'+str(counter)+'labeled'+'.png')
+        return image
     
     def __array_to_image(self, image_index, data_x):
         image = data_x[image_index]*255
