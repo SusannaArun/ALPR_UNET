@@ -44,7 +44,7 @@ class DataLoader:
     dataset = None
 
 
-    def __init__(self, root = r'C:\data subset', input_size = 512, output_size = 388, val_split = .2):
+    def __init__(self, root = r'C:\data subset', input_size = 512, output_size = 388, val_split = .1):
         self.INPUT_SIZE = input_size
         self.OUTPUT_SIZE = output_size
         self.RATIO = self.OUTPUT_SIZE/self.INPUT_SIZE
@@ -64,7 +64,7 @@ class DataLoader:
         self.dataset = tf.keras.utils.image_dataset_from_directory(directory = self.data_dir, 
                                                                    labels = None,
                                                                    label_mode = None,
-                                                                   validation_split = .2,
+                                                                   validation_split = .1,
                                                                    seed = 42,
                                                                    subset = "training",
                                                                    batch_size = 32,
