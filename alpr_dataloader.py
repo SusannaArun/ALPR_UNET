@@ -21,7 +21,6 @@ class DataLoader:
         
         so data_x[index][y][x][channel] gives you the top left corner
     
-    
     '''
     
     global_set = []
@@ -35,29 +34,50 @@ class DataLoader:
     data_plate_y = []
     data_car_y = []
     data_plate_text_y = []
+    data_plate_chars_y = []
     data_dir = "/data"
-    NUM_PIXELS = 512#264
+    INPUT_SIZE = -1#264
+    OUTPUT_SIZE = -1
+    RATIO = -1 #cast to int when using ratio
     HEIGHT = 1080
     WIDTH = 1920
+    dataset = None
 
 
-    def __init__(self, root = r'C:\data subset'):
+    def __init__(self, root = r'C:\data subset', input_size = 512, output_size = 388, val_split = .2):
+        self.INPUT_SIZE = input_size
+        self.OUTPUT_SIZE = output_size
+        self.RATIO = self.OUTPUT_SIZE/self.INPUT_SIZE
         self.global_set = sorted(os.listdir(data_path))
         self.data_x, self.data_y = self.__get_filepaths(self.global_set, data_path, self.data_x, self.data_y)
-        self.data_plate_y, self.data_car_y, self.data_plate_text_y = self.__parse_y(self.data_y, self.data_plate_y, self.data_car_y, self.data_plate_text_y)
+        self.data_plate_y, self.data_car_y, self.data_plate_text_y, self.data_plate_chars_y = self.__parse_y(self.data_y, 
+                                                                                                             self.data_plate_y, 
+                                                                                                             self.data_car_y, 
+                                                                                                             self.data_plate_text_y, 
+                                                                                                             self.data_plate_chars_y)
 
         if(os.path.isdir(self.data_dir)==False):
             os.mkdir(self.data_dir)
-            self.__open_images(self.data_x, self.data_plate_y, self.data_car_y)
-        
+            self.data_plate_chars_y = self.__crop_images(self.data_x, self.data_plate_y, self.data_car_y, self.data_plate_chars_y)
+        else:
+            self.data_plate_chars_y = self.__masks_only(self.data_plate_y, self.data_car_y, self.data_plate_chars_y)
+        self.dataset = tf.keras.utils.image_dataset_from_directory(directory = self.data_dir, 
+                                                                   labels = None,
+                                                                   label_mode = None,
+                                                                   validation_split = .2,
+                                                                   seed = 42,
+                                                                   subset = "training",
+                                                                   batch_size = 32,
+                                                                   image_size = (self.INPUT_SIZE, self.INPUT_SIZE))
 
         
 #Y is sorted. Do not shuffle until tf.dataset has been created
 #this also rectifies the labels by the resizing factor of the shrunken image
-    def __parse_y(self, data_y, data_plate_y, data_car_y, data_plate_text_y):
+    def __parse_y(self, data_y, data_plate_y, data_car_y, data_plate_text_y, data_plate_chars_y):
         car_pos = 1
         plate_text = 6
         plate_pos = 7
+        char_pos = [8, 9, 10, 11, 12, 13, 14]
         for x in range(0, len(data_y)):
             f = open(data_y[x])
             lines = f.readlines()
@@ -66,21 +86,20 @@ class DataLoader:
             data_plate_y.append(lines[plate_pos][16:])
             data_plate_y[x] = [int(i) for i in data_plate_y[x].split() if i.isdigit()] #parsing happens here
             data_plate_text_y.append(lines[plate_text][7:])
+            char_buffer = []
+            for y in range(0, len(char_pos)):
+                coord_string = lines[char_pos[y]][9:]
+                coord_string = [int(i) for i in coord_string.split() if i.isdigit()]
+                char_buffer.append(coord_string)
+                
+            data_plate_chars_y.append(char_buffer)
             f.close()
             
-        return np.array(data_plate_y), np.array(data_car_y), np.array(data_plate_text_y)
+        return np.array(data_plate_y), np.array(data_car_y), np.array(data_plate_text_y), np.array(data_plate_chars_y)
 
     
     #this method requires a lot of memory. just don't freak out if you run out of mem. also it takes forever. sorry its just a lot of data
-    def __open_images(self, data_x, data_plate_y, data_car_y, grayscale = False):
-        for x in range(0, len(data_x)):
-            buffer = PIL.Image.open(data_x[x])
-
-            buffer = self.__crop_images(buffer, x, data_plate_y, data_car_y)
-            if(grayscale==True):
-                PIL.ImageOps.grayscale(buffer)
-            
-            buffer.close()
+    
         
         
     
@@ -90,35 +109,35 @@ class DataLoader:
         '''Makes sure that we don't crop out the plate or outside of the image'''    
         if(left>plate[0]):
             left = plate[0]
-            right = left+self.NUM_PIXELS
+            right = left+self.INPUT_SIZE
         
         if(right<(plate[0]+plate[2])):
             right = (plate[0]+plate[2])
-            left = right-self.NUM_PIXELS
+            left = right-self.INPUT_SIZE
         
         if(top>plate[1]):
             top = plate[1]
-            bottom = top+self.NUM_PIXELS
+            bottom = top+self.INPUT_SIZE
         
         if(bottom<(plate[1]+plate[3])):
             bottom = plate[1]+plate[3]
-            top = bottom - self.NUM_PIXELS
+            top = bottom - self.INPUT_SIZE
             
         if(left<0):
             left = 0
-            right = self.NUM_PIXELS
+            right = self.INPUT_SIZE
         
         if(right>self.WIDTH):
             right = self.WIDTH
-            left = right-self.NUM_PIXELS
+            left = right-self.INPUT_SIZE
         
         if(top<0):
             top = 0
-            bottom = self.NUM_PIXELS
+            bottom = self.INPUT_SIZE
         
         if(bottom>self.HEIGHT):
             bottom = self.HEIGHT
-            top = bottom-self.NUM_PIXELS
+            top = bottom-self.INPUT_SIZE
             
         return left, top, right, bottom
     
@@ -130,60 +149,171 @@ class DataLoader:
         return buffer
     
     def __crop_and_save(self, image, index, counter, left, top, right, bottom, plate):
-        left, top, right, bottom = self.__check_bounds(left, top, right, bottom, plate)
+        #left, top, right, bottom = self.__check_bounds(left, top, right, bottom, plate)
         crop = image.crop((left, top, right, bottom))
         #crop.show()
         crop.save(r'/data/'+str(index)+'-'+str(counter)+'.png')
         return crop
     
-    #REDO THIS. MAKE A FUNCTION THAT CHECKS THE BOUNDS AND CORRECTS THEM IF CROP IS OUT OF BOUNDS
-    def __crop_images(self, image, index, data_plate_y, data_car_y):
-        counter = 0
+    def __adjust_input_to_output(self, bbox, left, top):
+        for x in range(len(bbox)):
+            self.__adjust_label(bbox[x], left, top)
+            for y in range(len(bbox[x])):
+                bbox[x][y] = int(bbox[x][y]*self.RATIO)
+        return bbox
+    
+    
+    #TEST THE MASK CREATION AND MAKE THE LABELS IN THE CROP IMAGES FUNCTION
+    def __make_seg_mask(self, index, data_plate_chars_y, left, top):
+        buffer = np.copy(data_plate_chars_y[index])
+        mask = np.zeros((self.OUTPUT_SIZE, self.OUTPUT_SIZE), dtype = np.float32)
+        buffer = self.__adjust_input_to_output(buffer, left, top)
+        for x in range(0, len(buffer)):
+            #buffer[x] = self.__adjust_label(buffer[x], left, top)
+            #buffer[x] = self.__adjust_input_to_output(buffer[x])
+            if(x<(len(buffer)-1)):
+                stop_x = buffer[x+1][0]
+            else:
+                stop_x = buffer[x][0]+buffer[x][2]
+            mask[buffer[x][1]:(buffer[x][1]+buffer[x][3]), buffer[x][0]:stop_x] = 1
         
-        car_y_buffer = data_car_y[index]
-        left = car_y_buffer[0]
-        right = car_y_buffer[0]+self.NUM_PIXELS
-        top = car_y_buffer[1]
-        bottom = car_y_buffer[1]+self.NUM_PIXELS
-        #label_buffer = []
-        local_plate = np.copy(data_plate_y[index])
-        #data_plate_y[index] = self.__adjust_label(index, data_plate_y, left, bottom)
+        return mask
+    
+
+    
+    def __masks_only(self, data_plate_y, data_car_y, data_plate_chars_y):
+        output_labels = []
+        for x in range(len(data_plate_y)):
+            counter = 0
+            
+            car_y_buffer = data_car_y[x]
+            left = car_y_buffer[0]
+            right = car_y_buffer[0]+self.INPUT_SIZE
+            top = car_y_buffer[1]
+            bottom = car_y_buffer[1]+self.INPUT_SIZE
+            label_buffer = []
+            
+            #anchor around top left corner
+            local_plate = np.copy(data_plate_y[x])
+            left, top, right, bottom = self.__check_bounds(left, top, right, bottom, local_plate)
+            adjusted_label = self.__make_seg_mask(x, data_plate_chars_y, left, top)
+            #self.__save_segment_label(adjusted_label, x, counter)
+            output_labels.append(adjusted_label)
+            counter+=1
+                      
+            
+            #anchor around top right corner
+            right = car_y_buffer[0]+car_y_buffer[2]
+            left = right-self.INPUT_SIZE               
+            local_plate = np.copy(data_plate_y[x])
+            left, top, right, bottom = self.__check_bounds(left, top, right, bottom, local_plate)
+            adjusted_label = self.__make_seg_mask(x, data_plate_chars_y, left, top)
+            #self.__save_segment_label(adjusted_label, x, counter)
+            output_labels.append(adjusted_label)
+            counter+=1
+            
+            #anchor around bottom left corner
+            bottom = car_y_buffer[1]+car_y_buffer[3]
+            top = bottom-self.INPUT_SIZE
+            local_plate = np.copy(data_plate_y[x])      
+            left, top, right, bottom = self.__check_bounds(left, top, right, bottom, local_plate)
+            adjusted_label = self.__make_seg_mask(x, data_plate_chars_y, left, top)
+            #self.__save_segment_label(adjusted_label, x, counter)
+            output_labels.append(adjusted_label)
+            counter+=1
+            
+            #anchor around bottom right corner
+            left = car_y_buffer[0]
+            right = car_y_buffer[0]+self.INPUT_SIZE
+            local_plate = np.copy(data_plate_y[x])       
+            left, top, right, bottom = self.__check_bounds(left, top, right, bottom, local_plate)
+            adjusted_label = self.__make_seg_mask(x, data_plate_chars_y, left, top)
+            #self.__save_segment_label(adjusted_label, x, counter)
+            output_labels.append(adjusted_label)
+        return np.array(output_labels, dtype = np.uint8)
         
-        crop1 = self.__crop_and_save(image, index, counter, left, top, right, bottom, local_plate)
-        adjusted_label = self.__adjust_label(local_plate, left, top)
-        crop1 = self.__show_image_plate_granular(adjusted_label, crop1, index, counter)
-        #label_buffer.append(adjusted_label)
-        counter+=1
-        #crop1.show()
+    def __crop_images(self, data_x, data_plate_y, data_car_y, data_plate_chars_y):
+    
+        '''
+        If the images aren't already preprocessed, that happens here. Cropped images and their corresponding segmentation
+        mask are saved here in a file in the root directory called 'data. it makes and saves 18000 images, so this
+        takes a long time to run the first time. 
+        '''
+        output_labels = []
+        for index in range(0, len(data_x)):
+            
+            
+            image = PIL.Image.open(data_x[index])
+            
+            counter = 0
         
-        right = car_y_buffer[0]+car_y_buffer[2]
-        left = right-self.NUM_PIXELS               
-        local_plate = np.copy(data_plate_y[index])
-        crop2 = self.__crop_and_save(image, index, counter, left, top, right, bottom, local_plate)
-        adjusted_label = self.__adjust_label(local_plate, left, top)
-        crop2 = self.__show_image_plate_granular(adjusted_label, crop2, index, counter)
-        #crop2.show()
-        counter+=1
+            car_y_buffer = data_car_y[index]
+            left = car_y_buffer[0]
+            right = car_y_buffer[0]+self.INPUT_SIZE
+            top = car_y_buffer[1]
+            bottom = car_y_buffer[1]+self.INPUT_SIZE
+            label_buffer = []
         
-        bottom = car_y_buffer[1]+car_y_buffer[3]
-        top = bottom-self.NUM_PIXELS
-        local_plate = np.copy(data_plate_y[index])      
-        crop3 = self.__crop_and_save(image, index, counter, left, top, right, bottom, local_plate)
-        adjusted_label = self.__adjust_label(local_plate, left, top)
-        crop3 = self.__show_image_plate_granular(adjusted_label, crop3, index, counter)
-        #crop3.show()
-        counter+=1
+            #anchor around top left corner
+            local_plate = np.copy(data_plate_y[index])
+            left, top, right, bottom = self.__check_bounds(left, top, right, bottom, local_plate)
+            crop1 = self.__crop_and_save(image, index, counter, left, top, right, bottom, local_plate)
+            #adjusted_label = self.__adjust_label(local_plate, left, top)
+            adjusted_label = self.__make_seg_mask(index, data_plate_chars_y, left, top)
+            #self.__save_segment_label(adjusted_label, index, counter)
+            #crop1 = self.__show_image_plate_granular(adjusted_label, crop1, index, counter)
+            output_labels.append(adjusted_label)
+            counter+=1
+            #crop1.show()
         
         
-        left = car_y_buffer[0]
-        right = car_y_buffer[0]+self.NUM_PIXELS
-        local_plate = np.copy(data_plate_y[index])       
-        crop4 = self.__crop_and_save(image, index, counter, left, top, right, bottom, data_plate_y[index])
-        adjusted_label = self.__adjust_label(local_plate, left, top)
-        crop4 = self.__show_image_plate_granular(adjusted_label, crop4, index, counter)
-        #crop4.show()
+            #anchor around top right corner
+            right = car_y_buffer[0]+car_y_buffer[2]
+            left = right-self.INPUT_SIZE               
+            local_plate = np.copy(data_plate_y[index])
+            left, top, right, bottom = self.__check_bounds(left, top, right, bottom, local_plate)
+            crop2 = self.__crop_and_save(image, index, counter, left, top, right, bottom, local_plate)
+            #adjusted_label = self.__adjust_label(local_plate, left, top)
+            adjusted_label = self.__make_seg_mask(index, data_plate_chars_y, left, top)
+            #self.__save_segment_label(adjusted_label, index, counter)
+            #crop2 = self.__show_image_plate_granular(adjusted_label, crop2, index, counter)
+            output_labels.append(adjusted_label)
+            #crop2.show()
+            counter+=1
         
-        return crop1#, crop2, crop3, crop4
+            #anchor around bottom left corner
+            bottom = car_y_buffer[1]+car_y_buffer[3]
+            top = bottom-self.INPUT_SIZE
+            local_plate = np.copy(data_plate_y[index])      
+            left, top, right, bottom = self.__check_bounds(left, top, right, bottom, local_plate)
+            crop3 = self.__crop_and_save(image, index, counter, left, top, right, bottom, local_plate)
+            #adjusted_label = self.__adjust_label(local_plate, left, top)
+            adjusted_label = self.__make_seg_mask(index, data_plate_chars_y, left, top)
+            #self.__save_segment_label(adjusted_label, index, counter)
+            #crop3 = self.__show_image_plate_granular(adjusted_label, crop3, index, counter)
+            output_labels.append(adjusted_label)
+            #crop3.show()
+            counter+=1
+        
+            #anchor around bottom right corner
+            left = car_y_buffer[0]
+            right = car_y_buffer[0]+self.INPUT_SIZE
+            local_plate = np.copy(data_plate_y[index])       
+            left, top, right, bottom = self.__check_bounds(left, top, right, bottom, local_plate)
+            crop4 = self.__crop_and_save(image, index, counter, left, top, right, bottom, data_plate_y[index])
+            #adjusted_label = self.__adjust_label(local_plate, left, top)
+            adjusted_label = self.__make_seg_mask(index, data_plate_chars_y, left, top)
+            #self.__save_segment_label(adjusted_label, index, counter)
+            #crop4 = self.__show_image_plate_granular(adjusted_label, crop4, index, counter)
+            output_labels.append(adjusted_label)
+            #crop4.show()
+            
+            
+            
+            
+            image.close()
+        return np.array(output_labels, dtype = np.uint8)
+        
         
     def __show_image_plate_granular(self, label, image, index, counter):
         image = np.array(image)
@@ -191,6 +321,11 @@ class DataLoader:
         image = PIL.Image.fromarray(image.astype(np.uint8))
         image.save(r'/data/'+str(index)+'-'+str(counter)+'labeled'+'.png')
         return image
+    
+    def __save_segment_label(self, image, index, counter):
+        image = np.array(image)
+        image = PIL.Image.fromarray(image.astype(np.uint8))
+        image.save(r'/data/'+str(index)+'-'+str(counter)+'labeled'+'.png')
     
     def __array_to_image(self, image_index, data_x):
         image = data_x[image_index]*255
@@ -212,14 +347,7 @@ class DataLoader:
         image = self.__array_to_image(image_index, data_x)
         image.show()
         
-        
-    
-    def show_image_car_box(self, image_index, data_x, data_plate_y):
-        pass
-    
-    def crop_to_y_bbox(self, data_x, data_plate_y, data_car_y):
-        pass
-        
+
     def __get_filepaths(self, global_set, data_path, data_x, data_y):        
         #this is a really convoluted way to get the file paths of each image and label
         for x in range(0, len(global_set)):
