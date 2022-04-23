@@ -43,7 +43,7 @@ class DataLoader:
     WIDTH = 1920
     dataset = None
 
-
+    #fix the channel size/ find output size/ get rid of 
     def __init__(self, root = r'C:\data subset', input_size = 512, output_size = 388, val_split = .1):
         self.INPUT_SIZE = input_size
         self.OUTPUT_SIZE = output_size
@@ -64,9 +64,9 @@ class DataLoader:
         self.dataset = tf.keras.utils.image_dataset_from_directory(directory = self.data_dir, 
                                                                    labels = None,
                                                                    label_mode = None,
-                                                                   validation_split = .1,
-                                                                   seed = 42,
-                                                                   subset = "training",
+                                                                   #validation_split = .1,
+                                                                   #seed = 42,
+                                                                   #subset = "training",
                                                                    batch_size = 32,
                                                                    image_size = (self.INPUT_SIZE, self.INPUT_SIZE))
 
