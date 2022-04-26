@@ -92,7 +92,7 @@ class DataLoader:
             os.mkdir(self.label_dir_val)
         if os.path.isdir(self.label_dir_test)==False:
             os.mkdir(self.label_dir_test)
-        #self.__crop_images(self.data_x, self.data_plate_y)
+        self.__crop_images(self.data_x, self.data_plate_y)
         print('debug stop point')
         self.dataset_train = tf.data.Dataset.list_files(self.data_dir_train + "*.png", seed = SEED)
         self.dataset_train = self.dataset_train.map(self.parse_image)
