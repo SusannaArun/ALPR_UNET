@@ -20,6 +20,13 @@ import random
 from shapely.geometry import Point
 from shapely.geometry import Polygon
 
+from datetime import date, datetime
+
+#tf.compat.v1.disable_eager_execution()
+
+today = date.today()
+now = datetime.now()
+
 data_path = r'C:/RodoSol-ALPR/images/cars-br'
 IMG_SIZE = 512
 BUFFER_SIZE = 4
@@ -68,7 +75,7 @@ class DataLoader:
     dataset_train = None
     dataset_val = None
 
-    def __init__(self, root = r'C:\data subset', input_size = 572, output_size = 388, val_split = .1, grayscale = True):
+    def __init__(self, root = r'C:\data subset', input_size = 512, output_size = 512, val_split = .1, grayscale = True):
         self.INPUT_SIZE = input_size
         self.OUTPUT_SIZE = output_size
         self.RATIO = self.OUTPUT_SIZE/self.INPUT_SIZE
@@ -96,9 +103,9 @@ class DataLoader:
         print('debug stop point')
         self.dataset_train = tf.data.Dataset.list_files(self.data_dir_train + "*.png", seed = SEED)
         self.dataset_train = self.dataset_train.map(self.parse_image)
-        self.dataset_val = tf.data.Dataset.list_files(self.data_dir_val + "*.png", seed = SEED)
+        self.dataset_val = tf.data.Dataset.list_files(self.data_dir_val + "*.png")
         self.dataset_val = self.dataset_val.map(self.parse_image)        
-        self.dataset_test = tf.data.Dataset.list_files(self.data_dir_test + "*.png", seed = SEED)        
+        self.dataset_test = tf.data.Dataset.list_files(self.data_dir_test + "*.png")        
         self.dataset_test = self.dataset_test.map(self.parse_image)
         
         #self.dataset = tf.keras.utils.image_dataset_from_directory(directory = self.data_dir, 
@@ -264,7 +271,8 @@ class DataLoader:
     
     
     #TEST THE MASK CREATION AND MAKE THE LABELS IN THE CROP IMAGES FUNCTION
-    def __make_seg_mask(self, index, data_plate_y, left, top):
+    def __make_seg_mask(self, x, data_plate_y, left, top):
+        index = x%(len(data_plate_y))
         buffer = np.copy(data_plate_y[index])
         mask = np.zeros((self.OUTPUT_SIZE, self.OUTPUT_SIZE), dtype = np.float32)
         buffer = self.__adjust_input_to_output(buffer, left, top)
@@ -320,7 +328,7 @@ class DataLoader:
         takes a long time to run the first time. 
         '''
         #output_labels = []
-        for index in range(0, len(data_x)):
+        for x in range(0, len(data_x)):
             
             '''
             local_plate[0], local_plate[1] -------------------local_plate[2], local_plate[3]
@@ -335,6 +343,7 @@ class DataLoader:
             
             
             '''
+            index = x%(len(data_x))
             image = PIL.Image.open(data_x[index])
             
             counter = 0
@@ -350,10 +359,10 @@ class DataLoader:
             #anchor around top left corner
             
             left, top, right, bottom = self.__check_bounds(left, top, right, bottom, local_plate)
-            crop1 = self.__crop_and_save(image, index, left, top, right, bottom, local_plate, normalize)
+            crop1 = self.__crop_and_save(image, x, left, top, right, bottom, local_plate, normalize)
             #adjusted_label = self.__adjust_label(local_plate, left, top)
             adjusted_label = self.__make_seg_mask(index, data_plate_y, left, top)
-            self.__save_segment_label(adjusted_label, index)
+            self.__save_segment_label(adjusted_label, x)
             #crop1 = self.__show_image_plate_granular(adjusted_label, crop1, index, counter)
             #output_labels.append(adjusted_label)
             counter+=1
@@ -362,7 +371,7 @@ class DataLoader:
         
            
             if(index%200==0):
-                print(index)
+                print(x)
             
             
             
@@ -508,7 +517,7 @@ def load_image_test(datapoint: dict) -> tuple:
 
 
         
-data = DataLoader(root = data_path)
+data = DataLoader(root = data_path, output_size = 512)
 #test.show_image_plate_box(0, test.data_x, test.data_plate_y)
 print('stop')
     
@@ -520,15 +529,15 @@ train = train.batch(BATCH_SIZE)
 train = train.prefetch(buffer_size = BUFFER_SIZE)
 
 val = data.dataset_val
-val = val.map(load_image_train)
+val = val.map(load_image_test)
 #val = val.repeat()
 val = val.batch(BATCH_SIZE)
 val = val.prefetch(buffer_size = BUFFER_SIZE)
 
 test = data.dataset_test
-test = test.map(load_image_train)
+test = test.map(load_image_test)
 #test = test.repeat()
-test = test.batch(BATCH_SIZE)
+test = test.batch(1)
 test = test.prefetch(buffer_size = BUFFER_SIZE)
 
 
@@ -609,5 +618,25 @@ model = tf.keras.Model(inputs = inputs, outputs = output)
 model.compile(optimizer = Adam(learning_rate = 0.0001), loss = tf.keras.losses.SparseCategoricalCrossentropy(), metrics = ['accuracy'])
 
 
-model_history = model.fit(train, epochs = 6, validation_data = val)
+model_history = model.fit(train, epochs = 3, validation_data = val, use_multiprocessing = True, verbose = 1)
 model.save('trained_uNet')
+#eval_set = test.batch(BATCH_SIZE)
+
+model.evaluate(test)
+
+other_outputs = model.predict(test)
+
+
+#outputs = []
+#test = test.enumerate()
+#iterator = iter(test)
+#for x in range(len(test)):
+#    buffer = iterator.get_next()
+#    
+#    out = model.predict_step(buffer)
+#    outputs.append(np.array(out))
+#outputs = model.predict_step(test)
+outputs = np.array(outputs)
+#np.save(r'model_predict_step_outputs', outputs)
+#np.save(r'model_predict_outputs', other_outputs)
+
